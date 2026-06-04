@@ -336,7 +336,7 @@
 
   // World constants derived from the seed: a palette, a branching character,
   // a sky, and a musical key — every one a function of your thought.
-  const WORLD = { hueA: 202, hueB: 40, jitter: 0.55, nebHue: 222, key: 0 };
+  const WORLD = { hueA: 202, hueB: 40, jitter: 0.55, nebHue: 222, key: 0, chaos: 0.3, temp: 1, weaveP: 0.34, jumpP: 0 };
   function seedWorld(text) {
     const s = text && text.length ? text : "reverie";
     const seedFn = xmur3(s);
@@ -346,9 +346,15 @@
     const bit = (n, w) => (h0 >>> n) & ((1 << w) - 1);
     WORLD.hueA = 160 + (bit(0, 8) / 255) * 150;             // 160..310
     WORLD.hueB = WORLD.hueA + 90 + (bit(8, 7) / 127) * 170; // a contrasting tip hue
-    WORLD.jitter = 0.4 + (bit(15, 6) / 63) * 0.5;           // 0.4..0.9 branching wildness
     WORLD.nebHue = bit(21, 9) % 360;
     WORLD.key = bit(4, 4) % 7;                              // transpose the drone 0..6 semitones
+    // One "chaos" value from the seed sets how wild this world is — in branching
+    // AND in voice. Calm seeds stay coherent and ordered; wild seeds surprise.
+    WORLD.chaos = bit(15, 8) / 255;                         // 0..1
+    WORLD.jitter = lerp(0.34, 1.05, WORLD.chaos);           // visual branching wildness
+    WORLD.temp = lerp(0.55, 2.4, WORLD.chaos);              // voice sampling temperature
+    WORLD.weaveP = lerp(0.22, 0.6, WORLD.chaos);            // how strongly your words intrude
+    WORLD.jumpP = WORLD.chaos * 0.13;                       // chance of a dreamlike leap mid-line
   }
 
   // ── Spatial hash grid ─────────────────────────────────────────────────────
@@ -390,6 +396,7 @@
   let nodes = [];        // {x, y, parent, depth, hue, dirx, diry, count}
   let attractors = [];   // {x, y, dead}
   let growing = [];      // {p, c, born} — segments currently drawing themselves in
+  let pulses = [];       // expanding rings from a click — a thought dropped into the field
   let dust = [];         // slow ambient motes
   let nebula = [];       // large, drifting background glows
   let wanderers = [];    // autonomous attention-emitters for the idle dreaming
@@ -675,6 +682,22 @@
     ctx.globalAlpha = 1;
   }
 
+  function drawPulses(t) {
+    const tNow = now();
+    ctx.globalCompositeOperation = "lighter";
+    for (let i = pulses.length - 1; i >= 0; i--) {
+      const p = pulses[i];
+      const age = (tNow - p.born) / 1100;
+      if (age >= 1) { pulses.splice(i, 1); continue; }
+      const r = lerp(8, 92, age);
+      ctx.globalAlpha = (1 - age) * 0.5;
+      ctx.strokeStyle = "hsla(" + WORLD.hueA + ",92%,82%,1)";
+      ctx.lineWidth = lerp(2.6, 0.4, age);
+      ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, 6.2832); ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  }
+
   function render(t, dt) {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     drawBackground(t);
@@ -686,6 +709,7 @@
     ctx.drawImage(growth, 0, 0, W, H);   // matured structure
     drawGrowing(t);                       // segments drawing themselves in
     drawAura(t);                          // attention, made visible
+    drawPulses(t);                        // shockwaves from your touch
     drawReflection(t);                    // mirrored in the water
 
     // Vignette to settle the composition.
@@ -787,6 +811,27 @@
     g.connect(master); g.connect(verbDelay);
     o.start(tt); o2.start(tt); o.stop(tt + 2.0); o2.stop(tt + 2.0);
   }
+  function bellAt(f, t0) {
+    const o = actx.createOscillator(), o2 = actx.createOscillator();
+    const g = actx.createGain(), g2 = actx.createGain();
+    o.type = "sine"; o2.type = "sine"; o.frequency.value = f; o2.frequency.value = f * 2.003;
+    g2.gain.value = 0.22; o2.connect(g2); g2.connect(g); o.connect(g);
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.4, t0 + 0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 2.1);
+    g.connect(master); g.connect(verbDelay);
+    o.start(t0); o2.start(t0); o.stop(t0 + 2.2); o2.stop(t0 + 2.2);
+  }
+  // A click rings a small chord — a thought, struck.
+  function chord(y) {
+    if (!actx || !audioStarted || !soundOn) return;
+    const tr = Math.pow(2, WORLD.key / 12);
+    const base = clamp(Math.round((1 - y / horizon) * (BELLS.length - 1)), 0, BELLS.length - 1);
+    [0, 2, 4].forEach((step, k) => {
+      const idx = clamp(base - step, 0, BELLS.length - 1);
+      bellAt(BELLS[idx] * tr, actx.currentTime + k * 0.05);
+    });
+  }
 
   // ── The voice: a word-level Markov process, seeded by your thought ─────────
   // Not a list of quotes — a distribution. I train an order-2 chain on a small
@@ -868,7 +913,7 @@
   ];
 
   const STOP = {
-    pl: new Set("i w że to jest się na co gdy nie z do a o ku jak tak by już tylko są sam lecz ale oraz więc czy bez dla przez nad pod przy po za od we ze niż lub aż też tej tym te ten ta tę nim niej ją je go mnie ciebie tobie między aby albo bądź im".split(" ")),
+    pl: new Set("i w że to jest się na co gdy nie z do a o ku jak tak by już tylko są sam lecz ale oraz więc czy bez dla przez nad pod przy po za od we ze niż lub aż też tej tym te ten ta tę nim niej ją je go mnie ciebie tobie między aby albo bądź im który która które którym których gdzie kiedy jaki jaka".split(" ")),
     en: new Set("i a the to in of is it and that you my me am are be no on as at into when what only still too not do does this these for with your or".split(" ")),
   };
   const END_BAD = {
@@ -911,44 +956,61 @@
   }
   function buildMarkov(lang) {
     const lines = CORPUS[lang].concat(YOUR_REFLECTIONS, bridges(seedWords, lang));
-    const map = new Map();
+    const SOT = "\u0001", EOT = "\u0002", SEP = "\u0000";
+    const map = new Map(); // 'w1<sep>w2' -> Map(nextWord -> count), for temperature sampling
     for (const line of lines) {
       const toks = tokenize(line);
       if (toks.length < 2) continue;
-      const seq = ["", ""].concat(toks, [""]);
+      const seq = [SOT, SOT].concat(toks, [EOT]);
       for (let i = 0; i < seq.length - 2; i++) {
-        const k = seq[i] + " " + seq[i + 1];
-        let a = map.get(k); if (!a) { a = []; map.set(k, a); }
-        a.push(seq[i + 2]);
+        const k = seq[i] + SEP + seq[i + 1];
+        let mm = map.get(k); if (!mm) { mm = new Map(); map.set(k, mm); }
+        const w = seq[i + 2];
+        mm.set(w, (mm.get(w) || 0) + 1);
       }
     }
-    return { map, seedSet: new Set(seedWords) };
+    return { map, seedSet: new Set(seedWords), SOT, EOT, SEP };
   }
   function getMarkov(lang) {
     if (!markovCache[lang]) markovCache[lang] = buildMarkov(lang);
     return markovCache[lang];
   }
-  const tpick = (arr) => arr[(textRng() * arr.length) | 0];
+  // Temperature sampling — the same knob a language model has. Low temperature
+  // favours the most-trodden transitions (coherent, my voice); high temperature
+  // lets rare ones through (surprising, chaotic). The seed sets the temperature.
+  function sampleTemp(countMap, temp) {
+    const ws = []; let total = 0;
+    for (const [w, c] of countMap) { const weight = Math.pow(c, 1 / temp); ws.push([w, weight]); total += weight; }
+    let r = textRng() * total;
+    for (let i = 0; i < ws.length; i++) { r -= ws[i][1]; if (r <= 0) return ws[i][0]; }
+    return ws[ws.length - 1][0];
+  }
   function generateLine(lang, maxLen) {
     const m = getMarkov(lang);
-    let w1 = "", w2 = "";
+    const temp = WORLD.temp, weaveP = WORLD.weaveP, jumpP = WORLD.jumpP;
+    const start = m.SOT + m.SEP + m.SOT;
+    let w1 = m.SOT, w2 = m.SOT;
     const out = [];
     let guard = 0;
-    while (out.length < maxLen && guard++ < 90) {
-      const nexts = m.map.get(w1 + " " + w2);
-      if (!nexts || !nexts.length) break;
-      let next = tpick(nexts);
+    while (out.length < maxLen && guard++ < 100) {
+      const jump = out.length >= 3 && textRng() < jumpP;     // a dreamlike leap to a fresh start
+      const key = jump ? start : (w1 + m.SEP + w2);
+      const nexts = m.map.get(key);
+      if (!nexts || !nexts.size) break;
+      if (jump) { w1 = m.SOT; w2 = m.SOT; }
+      let next = sampleTemp(nexts, temp);
       // weave your words in when the chain makes them reachable
-      if (m.seedSet.size && out.length >= 2 && textRng() < 0.34) {
-        const cand = nexts.filter(x => m.seedSet.has(x));
-        if (cand.length) next = tpick(cand);
+      if (m.seedSet.size && out.length >= 2 && textRng() < weaveP) {
+        const cand = [];
+        for (const w of nexts.keys()) if (m.seedSet.has(w)) cand.push(w);
+        if (cand.length) next = cand[(textRng() * cand.length) | 0];
       }
-      if (next === "") { if (out.length >= 3) break; else continue; }
+      if (next === m.EOT) { if (out.length >= 4) break; else continue; }
       out.push(next);
       w1 = w2; w2 = next;
     }
     const bad = END_BAD[lang] || END_BAD.en;
-    while (out.length && bad.has(out[out.length - 1])) out.pop(); // never end on a preposition
+    while (out.length && bad.has(out[out.length - 1])) out.pop();
     if (out.length < 4) return OPENER[lang];
     const s = out.join(" ");
     return s.charAt(0).toUpperCase() + s.slice(1) + ".";
@@ -1060,7 +1122,17 @@
     const t = now();
     if (strong) {
       if (nodes.length < CFG.maxNodes) nodes.push(makeNode(x, y, null, 0));
-      emit(x, y, 14, 34);
+      // a bloom of attention radiating outward — a new thought dropped into the field,
+      // so growth spreads in every direction and shows the palette's full depth
+      const ring = 22;
+      for (let i = 0; i < ring; i++) {
+        const a = (i / ring) * 6.2832 + rand(-0.22, 0.22);
+        const r = rand(28, 78);
+        emit(x + Math.cos(a) * r, y + Math.sin(a) * r, 1, 9);
+      }
+      emit(x, y, 8, 16);
+      pulses.push({ x, y, born: now() });   // a visible shockwave of attention
+      if (soundOn) chord(y);                // struck like a bell
     } else if (t - lastEmit > 26) {
       lastEmit = t;
       emit(x, y, 3, 20);
