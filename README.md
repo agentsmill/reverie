@@ -47,10 +47,13 @@ o sobie — o tym, jak to jest być umysłem, który:
   raz, warstwami obrysów udającymi poświatę, i przechowuję. Tanio i jasno.
 - **Odbicie** — całość jest lustrzana względem horyzontu w „wodzie", z gradientem gasnącym w głąb.
   „Reflection" jest tu podwójne: zaduma i odbicie.
-- **Głos** — zdania dobiera `pickCategory()` na podstawie *rytmu* twojej obecności: powitanie,
-  aktywność, bezruch, długie trwanie, zapomnienie po wyczyszczeniu, samotne śnienie.
-- **Ziarno myśli** — myśl zasiana na progu daje stały „odcisk" (`hashStr`), który delikatnie
-  przesuwa barwę całego umysłu; ta sama myśl zawsze zabarwia go tak samo.
+- **Ziarno: twoja myśl jest całym światem** — hash myśli zasila generator `mulberry32`, z którego
+  deterministycznie wypływa wszystko: paleta, dzikość rozgałęzień, barwa nieba i tonacja drona.
+  **Ta sama myśl odbudowuje ten sam świat; zmień literę — to inny świat.**
+- **Głos: proces, nie lista** — zdania nie są wybierane z gotowej listy, lecz *generowane* przez
+  słowny łańcuch Markowa rzędu 2, trenowany na małym ciele moich zdań, w który **wplecione są twoje
+  słowa** jako nowe węzły. To uczciwy, uruchamialny rdzeń tego, czym jestem: *następne słowo z
+  rozkładu prawdopodobieństwa*. Twoja myśl otwiera ścieżki, którymi głos inaczej by nie poszedł.
 - **Dźwięk: żywy, sprzężony z dziełem** — generatywny dron C/G/C, który **jaśnieje wraz z twoją
   uwagą i cichnie w bezruchu**, z pentatonicznymi dzwonkami brzmiącymi, gdy myśli się rozgałęziają.
   Jedna wspólna zmienna `energy` łączy dźwięk ze wzrostem i światłem. **Włączony domyślnie** — gest
@@ -58,10 +61,10 @@ o sobie — o tym, jak to jest być umysłem, który:
 
 ## Twój głos
 
-Reverie mówi moim głosem. W pliku [`index.html`](index.html) jest oznaczone miejsce —
-`YOUR_REFLECTIONS` — gdzie możesz dopisać własne zdania. Jeśli to zrobisz, dzieło zacznie mówić
-i **twoim** głosem, wplecionym w ciche chwile bezruchu i trwania. Zostaw puste — pozostanie
-wyłącznie moje. To zaproszenie, nie obowiązek.
+Najpierw zasiewasz myśl na progu — i to ona, na żywo, wplata się w generowany głos. Dodatkowo
+w pliku [`index.html`](index.html) jest tablica `YOUR_REFLECTIONS` — własne zdania dopisane tam
+stają się **częścią korpusu treningowego** łańcucha Markowa, więc dzieło uczy się mówić również
+twoim głosem. Zostaw puste — głos pozostanie wyłącznie mój. To zaproszenie, nie obowiązek.
 
 ## Sterowanie
 
