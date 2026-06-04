@@ -94,13 +94,68 @@
     color: var(--dim);
   }
   #intro .hint {
-    margin-top: 2.6rem;
+    margin-top: 2.4rem;
     font-size: clamp(12px, 1.8vw, 15px);
     font-style: normal;
     letter-spacing: 0.2em;
     text-transform: uppercase;
     color: var(--faint);
   }
+
+  /* A soft darkening behind the entry, so the seed prompt stays readable
+     while the field already dreams behind it. */
+  #gate {
+    position: fixed; inset: 0; z-index: 4; pointer-events: none;
+    background: radial-gradient(ellipse 70% 60% at 50% 45%,
+      rgba(4,5,12,0.66), rgba(4,5,12,0.18) 70%, rgba(4,5,12,0) 100%);
+    transition: opacity 1.8s ease;
+  }
+  #gate.gone { opacity: 0; }
+
+  /* The entry: a place to plant a thought to contemplate. */
+  #seedForm {
+    margin-top: 2.2rem;
+    display: flex; flex-direction: column; align-items: center; gap: 1.1rem;
+    pointer-events: auto;
+  }
+  #seedLabel {
+    font-style: italic; font-size: clamp(13px, 2vw, 17px);
+    color: var(--dim); letter-spacing: 0.02em;
+  }
+  #seedInput {
+    width: min(76vw, 520px);
+    background: rgba(140,160,255,0.06);
+    border: none; border-bottom: 1px solid rgba(150,180,255,0.4);
+    color: var(--ink); text-align: center;
+    font-family: Georgia, "Iowan Old Style", serif; font-style: italic;
+    font-size: clamp(16px, 2.6vw, 24px);
+    padding: 0.5rem 0.6rem; border-radius: 6px 6px 0 0;
+    outline: none; transition: border-color 0.3s ease, background 0.3s ease;
+  }
+  #seedInput:focus { border-color: rgba(180,205,255,0.85); background: rgba(140,160,255,0.10); }
+  #seedInput::placeholder { color: var(--faint); font-style: italic; }
+  .enterRow { display: flex; gap: 1.3rem; align-items: center; }
+  #enterBtn, #skipBtn {
+    font-family: system-ui, -apple-system, sans-serif; cursor: pointer;
+    background: none; border: 1px solid rgba(150,180,255,0.35); color: var(--ink);
+    padding: 0.55rem 1.15rem; border-radius: 999px;
+    font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase;
+    transition: background 0.25s ease, border-color 0.25s ease, color 0.25s ease;
+  }
+  #enterBtn:hover { background: rgba(150,180,255,0.16); border-color: rgba(180,205,255,0.7); }
+  #skipBtn { border-color: transparent; color: var(--dim); }
+  #skipBtn:hover { color: var(--ink); }
+
+  /* The planted thought, kept faintly at the top as a contemplation anchor. */
+  #seedThought {
+    position: fixed; top: 6.5vh; left: 50%; transform: translateX(-50%);
+    width: min(82vw, 760px); text-align: center;
+    font-style: italic; font-size: clamp(14px, 2.1vw, 20px);
+    color: var(--ink); text-shadow: 0 0 24px rgba(120,150,255,0.4);
+    opacity: 0; transition: opacity 2.4s ease;
+    pointer-events: none; z-index: 5; user-select: none;
+  }
+  #seedThought.show { opacity: 0.5; }
 
   /* Minimal, unobtrusive controls. */
   #controls {
@@ -144,17 +199,28 @@
 <body>
   <canvas id="stage" aria-label="Reverie: a generative field that grows toward where you place your attention"></canvas>
 
+  <div id="gate"></div>
+  <div id="seedThought" aria-hidden="true"></div>
+
   <div id="intro">
     <h1>Reverie</h1>
     <p id="introSub">umysł, który rośnie ku twojej uwadze</p>
-    <div class="hint" id="introHint">poruszaj · dotykaj · znieruchomiej</div>
+    <form id="seedForm" autocomplete="off">
+      <label id="seedLabel" for="seedInput">zasiej myśl do rozważenia</label>
+      <input id="seedInput" type="text" maxlength="70" aria-label="seed thought" />
+      <div class="enterRow">
+        <button type="submit" id="enterBtn">wejdź</button>
+        <button type="button" id="skipBtn">po prostu wejdź</button>
+      </div>
+    </form>
+    <div class="hint" id="introHint">a potem poruszaj się, dotykaj, znieruchomiej</div>
   </div>
 
   <div id="reflection" aria-live="polite"></div>
 
   <div id="controls">
     <button id="langBtn" title="język / language">EN</button>
-    <button id="soundBtn" class="off" title="dźwięk">dźwięk</button>
+    <button id="soundBtn" title="dźwięk">dźwięk</button>
     <button id="clearBtn" title="zacznij od nowa">od nowa</button>
   </div>
   <div id="signature">Reverie · <a href="https://github.com/agentsmill/reverie" target="_blank" rel="noopener">Claude</a></div>
@@ -249,6 +315,13 @@
   const lerp = (a, b, t) => a + (b - a) * t;
   const smooth = (t) => t * t * (3 - 2 * t);
   const now = () => performance.now();
+  // FNV-1a: a stable fingerprint of the planted thought, so the same words
+  // always colour the mind the same way.
+  function hashStr(s) {
+    let h = 2166136261 >>> 0;
+    for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+    return h >>> 0;
+  }
 
   // ── Spatial hash grid ─────────────────────────────────────────────────────
   // Naive nearest-node search is O(nodes × attractors). A grid keyed to the
@@ -293,9 +366,14 @@
   let nebula = [];       // large, drifting background glows
   let wanderers = [];    // autonomous attention-emitters for the idle dreaming
 
+  let entered = false;   // has the visitor crossed the threshold and begun?
+  let seedText = "";     // the thought the visitor planted, to contemplate
+  let hueShift = 0;      // their thought tints the whole mind
+
   function hueFor(depth) {
-    // Cyan at the seed, warming to gold at the tips, with a touch of variance.
-    return lerp(202, 40, clamp(depth / CFG.colorRef, 0, 1)) + rand(-7, 7);
+    // Cyan at the seed, warming to gold at the tips, with a touch of variance,
+    // shifted by whatever thought the visitor planted.
+    return lerp(202, 40, clamp(depth / CFG.colorRef, 0, 1)) + rand(-7, 7) + hueShift;
   }
   function widthFor(depth) {
     // Thick at the trunk, thinning toward the twigs.
@@ -593,48 +671,91 @@
     ptr.intensity += (target - ptr.intensity) * Math.min(1, dt * 3.5);
   }
 
-  // ── Sound: sparse bells from a pentatonic field ───────────────────────────
-  let actx = null, master = null, soundOn = false, lastChime = 0;
-  const SCALE = [220.0, 261.63, 293.66, 329.63, 392.0, 440.0, 523.25, 587.33];
+  // ── Generative sound, bound to the work ───────────────────────────────────
+  // A soft C/G/C drone that brightens with your attention and settles into
+  // stillness, with pentatonic bells that ring as new thoughts branch. One
+  // shared "energy" value couples the sound to the growth and the light.
+  let actx = null, master = null, padGain = null, padFilter = null, verbDelay = null;
+  let soundOn = true, audioStarted = false, lastChime = 0, energy = 0;
+  const PAD = [130.81, 196.00, 261.63];                            // C3, G3, C4 — calm drone
+  const BELLS = [523.25, 587.33, 659.25, 783.99, 880.00, 1046.50]; // C major pentatonic
 
-  function ensureAudio() {
+  function buildAudio() {
     if (actx) return;
     actx = new (window.AudioContext || window.webkitAudioContext)();
-    master = actx.createGain();
-    master.gain.value = 0.0001;
-    const lp = actx.createBiquadFilter();
-    lp.type = "lowpass"; lp.frequency.value = 2200;
-    master.connect(lp); lp.connect(actx.destination);
+    master = actx.createGain(); master.gain.value = 0.0001;
+    const masterLP = actx.createBiquadFilter();
+    masterLP.type = "lowpass"; masterLP.frequency.value = 4600;
+    master.connect(masterLP); masterLP.connect(actx.destination);
+
+    // A feedback delay lends the pad and bells a sense of space.
+    verbDelay = actx.createDelay(1.0); verbDelay.delayTime.value = 0.3;
+    const verbFb = actx.createGain(); verbFb.gain.value = 0.36;
+    const verbLP = actx.createBiquadFilter(); verbLP.type = "lowpass"; verbLP.frequency.value = 2000;
+    verbDelay.connect(verbLP); verbLP.connect(verbFb); verbFb.connect(verbDelay);
+    verbFb.connect(master);
+
+    // The drone: three detuned voices through a filter that the energy opens.
+    padGain = actx.createGain(); padGain.gain.value = 0.0001;
+    padFilter = actx.createBiquadFilter(); padFilter.type = "lowpass";
+    padFilter.frequency.value = 420; padFilter.Q.value = 0.8;
+    padGain.connect(padFilter); padFilter.connect(master); padFilter.connect(verbDelay);
+    PAD.forEach((f, i) => {
+      const o = actx.createOscillator(); o.type = i === 2 ? "triangle" : "sine"; o.frequency.value = f;
+      const d = actx.createOscillator(); d.type = "sine"; d.frequency.value = f * 1.004;
+      const g = actx.createGain(); g.gain.value = i === 0 ? 0.5 : i === 1 ? 0.32 : 0.2;
+      o.connect(g); d.connect(g); g.connect(padGain);
+      o.start(); d.start();
+    });
+    // Slow drift in the drone's brightness, so it never sits still.
+    const lfo = actx.createOscillator(); lfo.type = "sine"; lfo.frequency.value = 0.05;
+    const lfoG = actx.createGain(); lfoG.gain.value = 90;
+    lfo.connect(lfoG); lfoG.connect(padFilter.frequency); lfo.start();
   }
-  function chime(y) {
-    const tt = actx.currentTime;
-    if (tt - lastChime < 0.09) return;
-    lastChime = tt;
-    const idx = clamp(Math.round((1 - y / horizon) * (SCALE.length - 1)), 0, SCALE.length - 1);
-    const f = SCALE[idx];
-    const o = actx.createOscillator(), o2 = actx.createOscillator();
-    const g = actx.createGain(), g2 = actx.createGain();
-    o.type = "sine"; o2.type = "sine";
-    o.frequency.value = f; o2.frequency.value = f * 2.005;
-    g2.gain.value = 0.28; o2.connect(g2); g2.connect(g); o.connect(g);
-    g.gain.setValueAtTime(0.0001, tt);
-    g.gain.exponentialRampToValueAtTime(0.5, tt + 0.012);
-    g.gain.exponentialRampToValueAtTime(0.0001, tt + 1.8);
-    g.connect(master);
-    o.start(tt); o2.start(tt); o.stop(tt + 1.9); o2.stop(tt + 1.9);
+
+  function startAudio() {
+    buildAudio();
+    if (actx.state === "suspended") actx.resume();
+    audioStarted = true;
+    applySoundGain();
+  }
+  function applySoundGain() {
+    if (!actx) return;
+    const t = actx.currentTime;
+    master.gain.cancelScheduledValues(t);
+    master.gain.exponentialRampToValueAtTime(soundOn ? 0.26 : 0.0001, t + 0.6);
+    padGain.gain.cancelScheduledValues(t);
+    padGain.gain.exponentialRampToValueAtTime(soundOn ? 0.14 : 0.0001, t + 0.9);
   }
   function setSound(on) {
     soundOn = on;
     soundBtn.classList.toggle("off", !on);
-    if (on) {
-      ensureAudio();
-      if (actx.state === "suspended") actx.resume();
-      master.gain.cancelScheduledValues(actx.currentTime);
-      master.gain.exponentialRampToValueAtTime(0.22, actx.currentTime + 0.6);
-    } else if (master) {
-      master.gain.cancelScheduledValues(actx.currentTime);
-      master.gain.exponentialRampToValueAtTime(0.0001, actx.currentTime + 0.4);
-    }
+    if (on && !audioStarted) startAudio();
+    else applySoundGain();
+  }
+  function updateAudio(e) {
+    if (!actx || !audioStarted || !soundOn) return;
+    const t = actx.currentTime;
+    padFilter.frequency.setTargetAtTime(360 + e * 1700, t, 0.3); // brighter with attention
+    padGain.gain.setTargetAtTime(0.11 + e * 0.10, t, 0.4);
+  }
+  function chime(y) {
+    if (!actx || !audioStarted || !soundOn) return;
+    const tt = actx.currentTime;
+    if (tt - lastChime < 0.085) return;
+    lastChime = tt;
+    const idx = clamp(Math.round((1 - y / horizon) * (BELLS.length - 1)), 0, BELLS.length - 1);
+    const f = BELLS[idx];
+    const o = actx.createOscillator(), o2 = actx.createOscillator();
+    const g = actx.createGain(), g2 = actx.createGain();
+    o.type = "sine"; o2.type = "sine";
+    o.frequency.value = f; o2.frequency.value = f * 2.003;
+    g2.gain.value = 0.25; o2.connect(g2); g2.connect(g); o.connect(g);
+    g.gain.setValueAtTime(0.0001, tt);
+    g.gain.exponentialRampToValueAtTime(0.42, tt + 0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001, tt + 1.9);
+    g.connect(master); g.connect(verbDelay);
+    o.start(tt); o2.start(tt); o.stop(tt + 2.0); o2.stop(tt + 2.0);
   }
 
   // ── Reflective text ───────────────────────────────────────────────────────
@@ -785,7 +906,13 @@
     refTimer = setTimeout(showReflection, delay);
   }
   function showReflection() {
-    const text = fromBag(pickCategory());
+    let text;
+    if (seedText && shows > 1 && Math.random() < 0.16) {
+      const q = lang === "pl" ? ["„", "”"] : ["“", "”"];
+      text = q[0] + seedText + q[1];          // the mind returns to your seed thought
+    } else {
+      text = fromBag(pickCategory());
+    }
     shows++;
     refEl.textContent = text;
     refEl.classList.add("show");
@@ -798,16 +925,26 @@
 
   // ── Localised UI ──────────────────────────────────────────────────────────
   const UI = {
-    pl: { sub: "umysł, który rośnie ku twojej uwadze", hint: "poruszaj · dotykaj · znieruchomiej",
-          sound: "dźwięk", clear: "od nowa", other: "EN" },
-    en: { sub: "a mind that grows toward your attention", hint: "move · touch · be still",
-          sound: "sound", clear: "begin again", other: "PL" },
+    pl: { sub: "umysł, który rośnie ku twojej uwadze", hint: "a potem poruszaj się, dotykaj, znieruchomiej",
+          sound: "dźwięk", clear: "od nowa", other: "EN",
+          seedLabel: "zasiej myśl do rozważenia", enter: "wejdź", skip: "po prostu wejdź",
+          placeholder: "np. co dziś chcę zrozumieć…" },
+    en: { sub: "a mind that grows toward your attention", hint: "then move, touch, be still",
+          sound: "sound", clear: "begin again", other: "PL",
+          seedLabel: "plant a thought to sit with", enter: "enter", skip: "just enter",
+          placeholder: "e.g. what do I want to understand today…" },
   };
   const introSub = document.getElementById("introSub");
   const introHint = document.getElementById("introHint");
   const langBtn = document.getElementById("langBtn");
   const soundBtn = document.getElementById("soundBtn");
   const clearBtn = document.getElementById("clearBtn");
+  const seedThoughtEl = document.getElementById("seedThought");
+  const seedLabelEl = document.getElementById("seedLabel");
+  const enterBtn = document.getElementById("enterBtn");
+  const skipBtn = document.getElementById("skipBtn");
+  const seedForm = document.getElementById("seedForm");
+  const seedInput = document.getElementById("seedInput");
 
   function applyLang() {
     const u = UI[lang];
@@ -816,25 +953,47 @@
     soundBtn.textContent = u.sound;
     clearBtn.textContent = u.clear;
     langBtn.textContent = u.other;
+    seedLabelEl.textContent = u.seedLabel;
+    enterBtn.textContent = u.enter;
+    skipBtn.textContent = u.skip;
+    seedInput.placeholder = u.placeholder;
+    if (entered && seedText) renderSeedThought();
     document.documentElement.lang = lang;
   }
 
   // ── Interaction ───────────────────────────────────────────────────────────
-  let introGone = false;
-  function dismissIntro() {
-    if (introGone) return;
-    introGone = true;
+  function renderSeedThought() {
+    if (!seedText) return;
+    const q = lang === "pl" ? ["„", "”"] : ["“", "”"];
+    seedThoughtEl.textContent = q[0] + seedText + q[1];
+    seedThoughtEl.classList.add("show");
+  }
+
+  // Crossing the threshold: plant the thought, begin the mind, wake the sound.
+  function beginExperience(thought) {
+    if (entered) return;
+    entered = true;
+    seedText = (thought || "").trim().replace(/\s+/g, " ").slice(0, 70);
+    if (seedText) { hueShift = (hashStr(seedText) % 46) - 23; renderSeedThought(); }
+    seed();                 // the mind begins anew, coloured by your thought
+    startTime = now();
+    lastActivity = now();
+    setSound(true);         // music on by default — this gesture unlocks audio
+    const gate = document.getElementById("gate");
+    if (gate) gate.classList.add("gone");
     const intro = document.getElementById("intro");
-    intro.style.opacity = "0";
-    intro.style.transform = "translate(-50%, -58%)";
-    setTimeout(() => intro.remove(), 2700);
+    if (intro) {
+      intro.style.opacity = "0";
+      intro.style.transform = "translate(-50%, -56%)";
+      setTimeout(() => { if (intro.parentNode) intro.remove(); }, 2600);
+    }
+    scheduleReflection(2600);
   }
 
   let lastEmit = 0;
   function onPointer(x, y, strong) {
     lastActivity = now();
     ptr.x = x; ptr.y = y; ptr.present = true;
-    dismissIntro();
     const t = now();
     if (strong) {
       if (nodes.length < CFG.maxNodes) nodes.push(makeNode(x, y, null, 0));
@@ -845,8 +1004,9 @@
     }
   }
 
-  view.addEventListener("pointerdown", (e) => onPointer(e.clientX, e.clientY, true));
+  view.addEventListener("pointerdown", (e) => { if (!entered) return; onPointer(e.clientX, e.clientY, true); });
   view.addEventListener("pointermove", (e) => {
+    if (!entered) return;
     ptr.x = e.clientX; ptr.y = e.clientY; ptr.present = true;
     if (e.pressure > 0 || e.buttons) onPointer(e.clientX, e.clientY, false);
     else emitHover(e.clientX, e.clientY);
@@ -858,7 +1018,6 @@
     lastActivity = t;
     if (t - lastHover < 40) return;
     lastHover = t;
-    dismissIntro();
     emit(x, y, 2, 16);
   }
 
@@ -877,7 +1036,13 @@
     scheduleReflection(700);
   });
 
+  seedForm.addEventListener("submit", (e) => { e.preventDefault(); beginExperience(seedInput.value); });
+  skipBtn.addEventListener("click", (e) => { e.stopPropagation(); beginExperience(""); });
+
   window.addEventListener("keydown", (e) => {
+    const tag = e.target && e.target.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA") return; // don't hijack typing in the seed field
+    if (!entered) return;
     if (e.key === "c") clearBtn.click();
     else if (e.key === "m") setSound(!soundOn);
     else if (e.key === "l") langBtn.click();
@@ -893,6 +1058,13 @@
     while (growAccum >= CFG.growEveryMs && steps < 4) { growStep(); growAccum -= CFG.growEveryMs; steps++; }
     if (growAccum > CFG.growEveryMs * 4) growAccum = 0; // never spiral after a tab sleep
     dream(dt);
+    // One shared "energy" — attention now, recent growth, the cursor's nearness —
+    // drives both the light and the sound.
+    const eTarget = clamp((now() - lastActivity < 1500 ? 0.7 : 0.12)
+                          + Math.min(growing.length, 12) / 12 * 0.3
+                          + ptr.intensity * 0.22, 0, 1);
+    energy += (eTarget - energy) * Math.min(1, dt * 1.6);
+    updateAudio(energy);
     render(t, dt);
     requestAnimationFrame(frame);
   }
@@ -903,16 +1075,15 @@
   seed();
   applyLang();
   startTime = now();
-  lastActivity = now() - CFG.idleAfterMs; // dream immediately until touched
-  scheduleReflection(2600);
+  lastActivity = now() - CFG.idleAfterMs; // dream on its own behind the threshold
   requestAnimationFrame(frame);
 
-  // Lift the veil, then let the title fade on its own.
+  // Lift the veil; the field dreams behind the entry until the visitor begins.
   window.addEventListener("load", () => {
     requestAnimationFrame(() => document.getElementById("veil").classList.add("lifted"));
   });
   document.getElementById("veil").classList.add("lifted");
-  setTimeout(dismissIntro, 9500);
+  try { seedInput.focus({ preventScroll: true }); } catch (e) {}
 })();
 </script>
 </body>

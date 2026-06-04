@@ -1,3 +1,5 @@
 .claude/
+.playwright-mcp/
+verify-*.jpeg
 .DS_Store
 *.log
