@@ -309,8 +309,12 @@
 
   function resize() {
     dpr = Math.min(window.devicePixelRatio || 1, 2);
-    W = window.innerWidth;
-    H = window.innerHeight;
+    // Size to the canvas's ACTUAL displayed box, not window.innerHeight — on
+    // mobile those differ (toolbar, dvh), and the gap is what put the focus
+    // point below the finger.
+    const r = view.getBoundingClientRect();
+    W = Math.round(r.width) || window.innerWidth;
+    H = Math.round(r.height) || window.innerHeight;
     horizon = H * CFG.horizonFrac;
     view.width = Math.floor(W * dpr);
     view.height = Math.floor(H * dpr);
@@ -1173,12 +1177,20 @@
     }
   }
 
-  view.addEventListener("pointerdown", (e) => { if (!entered) return; onPointer(e.clientX, e.clientY, true); });
+  // Map a viewport coordinate (clientX/Y) into the canvas's logical render space.
+  // On mobile the canvas does NOT sit 1:1 on the viewport, so this rect-based
+  // mapping is what keeps the focus point exactly under your finger.
+  function mapPoint(cx, cy) {
+    const r = view.getBoundingClientRect();
+    return [(cx - r.left) * (W / (r.width || 1)), (cy - r.top) * (H / (r.height || 1))];
+  }
+  view.addEventListener("pointerdown", (e) => { if (!entered) return; const p = mapPoint(e.clientX, e.clientY); onPointer(p[0], p[1], true); });
   view.addEventListener("pointermove", (e) => {
     if (!entered) return;
-    ptr.x = e.clientX; ptr.y = e.clientY; ptr.present = true;
-    if (e.pressure > 0 || e.buttons) onPointer(e.clientX, e.clientY, false);
-    else emitHover(e.clientX, e.clientY);
+    const p = mapPoint(e.clientX, e.clientY);
+    ptr.x = p[0]; ptr.y = p[1]; ptr.present = true;
+    if (e.pressure > 0 || e.buttons) onPointer(p[0], p[1], false);
+    else emitHover(p[0], p[1]);
   });
   view.addEventListener("pointerleave", () => { ptr.present = false; });
   let lastHover = 0;
@@ -1197,9 +1209,10 @@
       if (!entered) return;
       const tt = e.changedTouches && e.changedTouches[0];
       if (!tt) return;
-      ptr.x = tt.clientX; ptr.y = tt.clientY; ptr.present = true;
-      if (strong) onPointer(tt.clientX, tt.clientY, true);
-      else emitHover(tt.clientX, tt.clientY);
+      const p = mapPoint(tt.clientX, tt.clientY);
+      ptr.x = p[0]; ptr.y = p[1]; ptr.present = true;
+      if (strong) onPointer(p[0], p[1], true);
+      else emitHover(p[0], p[1]);
     };
     view.addEventListener("touchstart", (e) => { e.preventDefault(); touchAt(e, true); }, { passive: false });
     view.addEventListener("touchmove", (e) => { e.preventDefault(); touchAt(e, false); }, { passive: false });
