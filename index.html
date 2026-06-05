@@ -1190,6 +1190,22 @@
     emit(x, y, 2, 16);
   }
 
+  // Fallback for older browsers without Pointer Events. Gated on !window.PointerEvent
+  // so modern phones (which all support pointer events) never double-fire.
+  if (!window.PointerEvent) {
+    const touchAt = (e, strong) => {
+      if (!entered) return;
+      const tt = e.changedTouches && e.changedTouches[0];
+      if (!tt) return;
+      ptr.x = tt.clientX; ptr.y = tt.clientY; ptr.present = true;
+      if (strong) onPointer(tt.clientX, tt.clientY, true);
+      else emitHover(tt.clientX, tt.clientY);
+    };
+    view.addEventListener("touchstart", (e) => { e.preventDefault(); touchAt(e, true); }, { passive: false });
+    view.addEventListener("touchmove", (e) => { e.preventDefault(); touchAt(e, false); }, { passive: false });
+    view.addEventListener("touchend", () => { ptr.present = false; });
+  }
+
   langBtn.addEventListener("click", (e) => {
     e.stopPropagation();
     lang = lang === "pl" ? "en" : "pl";
