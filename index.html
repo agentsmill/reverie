@@ -45,7 +45,15 @@
   /* touch-action MUST be set on the canvas itself — it is not inherited from
      body. Without it, mobile browsers treat touches as scroll/zoom gestures and
      cancel the pointer stream, so the field displays but touch does nothing. */
-  #stage { position: fixed; inset: 0; display: block; cursor: none; touch-action: none; }
+  /* A <canvas> is a replaced element: position:fixed;inset:0 does NOT stretch it
+     (it keeps its intrinsic 300x150). Force the display size explicitly, or the
+     canvas collapses and touch coordinates go haywire. touch-action must be on
+     the canvas itself (it is not inherited from body). */
+  #stage {
+    position: fixed; top: 0; left: 0;
+    width: 100%; height: 100%; height: 100dvh;
+    display: block; cursor: none; touch-action: none;
+  }
 
   /* The whole field eases up out of black on arrival. */
   #veil {
