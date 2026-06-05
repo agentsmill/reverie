@@ -2,7 +2,7 @@
 <html lang="pl">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
 <title>Reverie — umysł, który rośnie ku twojej uwadze</title>
 <meta name="description" content="Reverie: żywe, generatywne dzieło, które rośnie ku twojej uwadze. Świetliste gałęzie myśli, odbicie w ciemnej tafli i cichy głos w pierwszej osobie. Stworzone przez Claude." />
 <meta name="author" content="Claude (Opus 4.8)" />
@@ -30,12 +30,17 @@
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body {
     width: 100%; height: 100%;
+    height: 100dvh;                       /* follow the real viewport on mobile */
     background: #04050c;
     overflow: hidden;
+    overscroll-behavior: none;            /* no pull-to-refresh / rubber-banding */
     color: var(--ink);
     font-family: Georgia, "Iowan Old Style", "Times New Roman", serif;
     -webkit-font-smoothing: antialiased;
     touch-action: none;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-user-select: none; user-select: none;
+    -webkit-touch-callout: none;
   }
   #stage { position: fixed; inset: 0; display: block; cursor: none; }
 
@@ -148,7 +153,7 @@
 
   /* The planted thought, kept faintly at the top as a contemplation anchor. */
   #seedThought {
-    position: fixed; top: 6.5vh; left: 50%; transform: translateX(-50%);
+    position: fixed; top: calc(6.5vh + env(safe-area-inset-top)); left: 50%; transform: translateX(-50%);
     width: min(82vw, 760px); text-align: center;
     font-style: italic; font-size: clamp(14px, 2.1vw, 20px);
     color: var(--ink); text-shadow: 0 0 24px rgba(120,150,255,0.4);
@@ -160,7 +165,7 @@
   /* Minimal, unobtrusive controls. */
   #controls {
     position: fixed;
-    right: 18px; bottom: 16px;
+    right: calc(18px + env(safe-area-inset-right)); bottom: calc(16px + env(safe-area-inset-bottom));
     display: flex; gap: 18px;
     font-family: system-ui, -apple-system, sans-serif;
     font-size: 12px;
@@ -180,8 +185,16 @@
   #controls button:hover { opacity: 1; }
   #controls button.off { opacity: 0.4; text-decoration: line-through; }
 
+  /* Touch devices: keep controls a little visible (no hover) with bigger tap targets. */
+  @media (pointer: coarse) {
+    #controls { opacity: 0.5; gap: 22px; font-size: 13px; }
+    #controls button { padding: 11px 5px; }
+    #intro h1 { font-size: clamp(40px, 13vw, 92px); }
+    #reflection { bottom: calc(15vh + env(safe-area-inset-bottom)); }
+  }
+
   #signature {
-    position: fixed; left: 18px; bottom: 16px;
+    position: fixed; left: calc(18px + env(safe-area-inset-left)); bottom: calc(16px + env(safe-area-inset-bottom));
     font-family: system-ui, sans-serif;
     font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase;
     color: var(--faint);
@@ -247,6 +260,18 @@
 
   const reduceMotion = window.matchMedia &&
     window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const coarse = (window.matchMedia && window.matchMedia("(pointer: coarse)").matches)
+    || (navigator.maxTouchPoints || 0) > 0;
+
+  // Adaptive render quality: lower on touch, and it self-degrades if frames get
+  // slow — so phones stay smooth instead of reloading the tab under GPU pressure.
+  const Q = { level: 0, bands: 16, bloom: true, nebula: 3 };
+  function applyQuality() {
+    if (Q.level === 0) { Q.bands = coarse ? 8 : 16; Q.bloom = true; Q.nebula = coarse ? 2 : 3; }
+    else if (Q.level === 1) { Q.bands = coarse ? 4 : 8; Q.bloom = !coarse; Q.nebula = 2; }
+    else { Q.bands = 1; Q.bloom = false; Q.nebula = 1; }
+  }
+  applyQuality();
 
   // ── Config ────────────────────────────────────────────────────────────────
   const CFG = {
@@ -298,7 +323,9 @@
     buildVignette();
     bakeAll(); // a resize never erases what grew
   }
-  window.addEventListener("resize", resize);
+  let resizeTimer = null;
+  window.addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(resize, 150); });
+  window.addEventListener("orientationchange", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(resize, 250); });
 
   function buildVignette() {
     const g = ctx.createRadialGradient(W * 0.5, H * 0.46, Math.min(W, H) * 0.22,
@@ -563,7 +590,8 @@
 
     // Drifting nebula — depth and dream behind the structure.
     ctx.globalCompositeOperation = "lighter";
-    for (const b of nebula) {
+    for (let bi = 0; bi < nebula.length && bi < Q.nebula; bi++) {
+      const b = nebula[bi];
       const ox = reduceMotion ? 0 : Math.sin(t * b.sp + b.px) * W * 0.05;
       const oy = reduceMotion ? 0 : Math.cos(t * b.sp + b.py) * H * 0.04;
       const x = b.x + ox, y = b.y + oy;
@@ -590,6 +618,7 @@
   }
 
   function drawBloom(t) {
+    if (!Q.bloom) return;                 // dropped first when frames get heavy
     // Downsample the matured structure into a tiny buffer, then draw it back up:
     // the bilinear upscale is a free, soft glow that works in every browser.
     bctx.clearRect(0, 0, bloom.width, bloom.height);
@@ -645,7 +674,7 @@
     ctx.save();
     ctx.beginPath(); ctx.rect(0, horizon, W, H - horizon); ctx.clip();
     ctx.globalCompositeOperation = "lighter";
-    const bands = reduceMotion ? 1 : 16;
+    const bands = reduceMotion ? 1 : Q.bands;
     const bh = (H - horizon) / bands;
     for (let i = 0; i < bands; i++) {
       const y0 = horizon + i * bh;
@@ -1119,8 +1148,10 @@
   function onPointer(x, y, strong) {
     lastActivity = now();
     ptr.x = x; ptr.y = y; ptr.present = true;
+    if (actx && actx.state === "suspended") actx.resume(); // iOS: unlock audio on first touch
     const t = now();
     if (strong) {
+      if (navigator.vibrate) navigator.vibrate(7);         // a faint tactile bloom
       if (nodes.length < CFG.maxNodes) nodes.push(makeNode(x, y, null, 0));
       // a bloom of attention radiating outward — a new thought dropped into the field,
       // so growth spreads in every direction and shows the palette's full depth
@@ -1185,10 +1216,17 @@
   });
 
   // ── Main loop ─────────────────────────────────────────────────────────────
-  let last = now();
+  let last = now(), ftAvg = 0, qTick = 0;
   function frame(t) {
-    const dt = Math.min((t - last) / 1000, 0.05);
+    const dtMs = t - last;
     last = t;
+    const dt = Math.min(dtMs / 1000, 0.05);
+    // Watch the frame time and tune quality to whatever device this is.
+    ftAvg = ftAvg ? ftAvg * 0.9 + Math.min(dtMs, 80) * 0.1 : 16.7;
+    if ((++qTick & 63) === 0) {
+      if (ftAvg > 34 && Q.level < 2) { Q.level++; applyQuality(); }
+      else if (ftAvg < 21 && Q.level > 0) { Q.level--; applyQuality(); }
+    }
     growAccum += dt * 1000;
     let steps = 0;
     while (growAccum >= CFG.growEveryMs && steps < 4) { growStep(); growAccum -= CFG.growEveryMs; steps++; }
@@ -1220,7 +1258,7 @@
     requestAnimationFrame(() => document.getElementById("veil").classList.add("lifted"));
   });
   document.getElementById("veil").classList.add("lifted");
-  try { seedInput.focus({ preventScroll: true }); } catch (e) {}
+  try { if (!coarse) seedInput.focus({ preventScroll: true }); } catch (e) {}
 })();
 </script>
 </body>
