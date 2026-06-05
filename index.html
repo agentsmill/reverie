@@ -42,7 +42,10 @@
     -webkit-user-select: none; user-select: none;
     -webkit-touch-callout: none;
   }
-  #stage { position: fixed; inset: 0; display: block; cursor: none; }
+  /* touch-action MUST be set on the canvas itself — it is not inherited from
+     body. Without it, mobile browsers treat touches as scroll/zoom gestures and
+     cancel the pointer stream, so the field displays but touch does nothing. */
+  #stage { position: fixed; inset: 0; display: block; cursor: none; touch-action: none; }
 
   /* The whole field eases up out of black on arrival. */
   #veil {
