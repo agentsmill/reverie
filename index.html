@@ -439,6 +439,8 @@
   let attractors = [];   // {x, y, dead}
   let growing = [];      // {p, c, born} — segments currently drawing themselves in
   let pulses = [];       // expanding rings from a click — a thought dropped into the field
+  let pending = [];      // canopy attractors waiting — released a sip at a time, so it starts as a seed
+  let releaseAccum = 0;
   let dust = [];         // slow ambient motes
   let nebula = [];       // large, drifting background glows
   let wanderers = [];    // autonomous attention-emitters for the idle dreaming
@@ -464,18 +466,31 @@
     nodes.length = 0;
     attractors.length = 0;
     growing.length = 0;
+    pending.length = 0;
+    releaseAccum = 0;
     gctx.clearRect(0, 0, W, H);
-    // One origin near the waterline — everything descends from a single point.
+    // One origin near the waterline — everything descends from a single seed.
     nodes.push(makeNode(W * 0.5, horizon * 0.98, null, 0));
-    // A fanned canopy of faint attention, so the untouched field already grows
-    // into something balanced and alive.
+    // The canopy is QUEUED, not planted at once. It is released a sip at a time
+    // (lowest first), so the mind begins as a single seed and unfurls upward
+    // before your eyes instead of arriving fully grown.
     for (let i = 0; i < 150; i++) {
       const ty = rnd();                          // 0 at base, 1 near the top
       const y = (0.66 - ty * 0.54) * H;
       const spread = (0.10 + ty * 0.34) * W;
       const x = W * 0.5 + rand(-spread, spread);
       if (x < W * 0.06 || x > W * 0.94) continue;
-      attractors.push({ x, y, dead: false });
+      pending.push({ x, y });
+    }
+    pending.sort((a, b) => b.y - a.y);           // nearest the seed first → grows upward
+    releaseCanopy(2);                            // a first, tiny sprout
+  }
+
+  // Move a few queued attractors into play — the slow unfurling of the seed.
+  function releaseCanopy(n) {
+    for (let i = 0; i < n && pending.length; i++) {
+      const p = pending.shift();
+      attractors.push({ x: p.x, y: p.y, dead: false });
     }
   }
 
@@ -578,6 +593,7 @@
   let lastActivity = 0;
 
   function dream(dt) {
+    if (pending.length) return;                 // still unfurling the seed — don't pile on
     if (now() - lastActivity < CFG.idleAfterMs) return;
     for (const w of wanderers) {
       w.ang += rand(-0.6, 0.6) * dt;
@@ -587,7 +603,7 @@
       if (w.y < horizon * 0.12 || w.y > horizon * 0.96) w.ang = -w.ang;
       w.x = clamp(w.x, W * 0.08, W * 0.92);
       w.y = clamp(w.y, horizon * 0.12, horizon * 0.96);
-      if (rnd() < 0.55) emit(w.x, w.y, 2, 26);
+      if (rnd() < 0.2) emit(w.x, w.y, 1, 26);    // gentle, sparse drift once it has unfurled
     }
   }
 
@@ -1271,6 +1287,10 @@
     let steps = 0;
     while (growAccum >= CFG.growEveryMs && steps < 4) { growStep(); growAccum -= CFG.growEveryMs; steps++; }
     if (growAccum > CFG.growEveryMs * 4) growAccum = 0; // never spiral after a tab sleep
+    // Unfurl the queued canopy slowly, so the field grows from a seed rather
+    // than arriving fully grown. Your touch still grows it instantly.
+    releaseAccum += dtMs;
+    if (pending.length && releaseAccum > 340) { releaseAccum = 0; releaseCanopy(1 + (rnd() < 0.5 ? 1 : 0)); }
     dream(dt);
     // One shared "energy" — attention now, recent growth, the cursor's nearness —
     // drives both the light and the sound.
